@@ -6,15 +6,17 @@
 
 // attributes
 int currentTram[5];
-bool isGoodTram;
-int whoCanTouchMe[1];
+bool isGoodTram = true;
+
+// definit si il peut etre touche par un tir aerien/sol ou les deux 0 ou 1
+int whoCanTouchMe[1] = { 0 };
 int value = 0;
+bool isread = false;
 
 enum State
 {
     WAITING,
     START_TRAM,
-    WAIT_SYNCRO,
     START_TRAM_D1,
     START_TRAM_D2,
     DATA_TRAM,
@@ -22,7 +24,7 @@ enum State
     WIN
 };
 
-const String strState[] = {"WAITING", "START_TRAM", "WAIT_SYNCRO", "START_TRAM_D1", "START_TRAM_D2", "DATA_TRAM", "DATA_TRAM_PARITY", "WIN"};
+const String strState[] = {"WAITING", "START_TRAM", "START_TRAM_D1", "START_TRAM_D2", "DATA_TRAM", "DATA_TRAM_PARITY", "WIN"};
 
 String stateToString(int state)
 {
@@ -36,7 +38,7 @@ String stateToString(int state)
     int tempsRead = 0;
     int tempsWrite = 0;
     int itSeuil = 0;
-    float marge = 1.5;
+    float marge = 250;
     int seuilMed[20];
     int pinDetector = 35;
 
@@ -49,10 +51,13 @@ void calcSeuil(){
     seuil = seuil/20;
 }
 
+int lastread = 0;
+
 int getBit(int pin)
 {
-  if(analogRead(pin) > seuil*marge) return 1;
-  else return 0;
+    lastread = analogRead(pin);
+    if(lastread > seuil+marge) return 1;
+    else return 0;
 }
 
 void secondLoop()
@@ -62,14 +67,14 @@ void secondLoop()
   {
     tempsRead = millis();
     int tmp = analogRead(pinDetector);
-    if (tmp > seuil*marge)
+    if (tmp > seuil+marge)
     {
-      seuilMed[itSeuil%20] = seuil*marge;
+      seuilMed[itSeuil%20] = seuil+marge;
       
     }
-    else if (tmp < seuil/marge)
+    else if (tmp < seuil-marge)
     {
-      seuilMed[itSeuil%20] = seuil/marge;
+      seuilMed[itSeuil%20] = seuil-marge;
     }
     else
     {
@@ -82,7 +87,7 @@ void secondLoop()
   {
     tempsWrite = millis();
     calcSeuil();
-    printf("Seuil Actuel : %d\n", seuil);
+  //  printf("\nSeuil Actuel : %d\n", seuil);
   }
 }
 
@@ -111,6 +116,8 @@ class Timer
     }
 };
 
+Timer timer;
+
 // region FSM
 
 class FSM
@@ -134,6 +141,13 @@ bool FSM::checkState(State src, State tgt, bool cond = true)
     if (src == _currentState && cond)
     {
         _currentState = tgt;
+    /*  Serial.println(strState[_currentState]
+        +" |lastread:" + lastread 
+        + " |Elapsed:" + timer.elapsed()
+        + " |Value:" + value 
+        + " |isGoodTram:"+ isGoodTram);*/  
+        timer.restart();
+        isread = false;
         return true;
     }
     return false;
@@ -148,29 +162,27 @@ State FSM::getCurrentState()
 
 // declaration class
 FSM fsm;
-Timer timer;
+
+
 
 void runFSM()
 {
-    fsm.checkState(WAITING, WAIT_SYNCRO, value == 1);
-    fsm.checkState(WAIT_SYNCRO, START_TRAM, timer.elapsed() >= 100);
+    fsm.checkState(START_TRAM, WAITING, (!isGoodTram && timer.elapsed() >= 20) || timer.elapsed() >= 25);
+    fsm.checkState(START_TRAM, START_TRAM_D1, currentTram[0] == 1 && timer.elapsed() >= 20);
 
-    fsm.checkState(START_TRAM, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM, START_TRAM_D1, currentTram[0] == 1 && timer.elapsed() >= 200);
+    fsm.checkState(START_TRAM_D1, WAITING, (!isGoodTram && timer.elapsed() >= 20) || timer.elapsed() >= 25);
+    fsm.checkState(START_TRAM_D1, START_TRAM_D2, currentTram[1] == 1 && timer.elapsed() >= 20);
 
-    fsm.checkState(START_TRAM_D1, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM_D1, START_TRAM_D2, currentTram[1] == 1 && timer.elapsed() >= 200);
+    fsm.checkState(START_TRAM_D2, WAITING, (!isGoodTram && timer.elapsed() >= 20) || timer.elapsed() >= 25);
+    fsm.checkState(START_TRAM_D2, DATA_TRAM, currentTram[2] == 0 && timer.elapsed() >= 20);
 
-    fsm.checkState(START_TRAM_D2, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM_D2, DATA_TRAM, currentTram[2] == 0 && timer.elapsed() >= 200);
+    fsm.checkState(DATA_TRAM, DATA_TRAM_PARITY, timer.elapsed() >= 20);
 
-    fsm.checkState(DATA_TRAM, WAITING, !isGoodTram);
-    fsm.checkState(DATA_TRAM, DATA_TRAM_PARITY, isGoodTram && timer.elapsed() >= 200);
+    fsm.checkState(WAITING, START_TRAM, value == 1);
 
-    fsm.checkState(DATA_TRAM_PARITY, WAITING, !isGoodTram);
-    //fsm.checkState(DATA_TRAM_PARITY, WAITING, isGoodTram && timer.elapsed() >= 2000);
+    fsm.checkState(DATA_TRAM_PARITY, WAITING, (!isGoodTram && timer.elapsed() >= 20) || timer.elapsed() >= 25);
 
-    fsm.checkState(DATA_TRAM_PARITY, WIN, isGoodTram);
+    fsm.checkState(DATA_TRAM_PARITY, WIN, isGoodTram && timer.elapsed() >= 20);
     
     
 }
@@ -179,21 +191,22 @@ void runFSM()
 void setup()
 {
     Serial.begin(9600);
-    Serial.println("Serial ok");
-
+    timer.start();
     pinMode(pinDetector, INPUT);
     seuil = analogRead(pinDetector);
     for (int i = 0; i <20;i++) {
         seuilMed[i] = analogRead(pinDetector);
     }
 
+
 }
 
 void loop()
 {
+    value = getBit(pinDetector);
     secondLoop();
     runFSM();
-    value = getBit(pinDetector);
+    
 
     // run the current state
     switch(fsm.getCurrentState())
@@ -201,42 +214,64 @@ void loop()
         case WAITING: 
             // do nothing
             break;
-
         case START_TRAM:
-            // definit si il peut etre touche par un tir aerien/sol ou les deux 
-            whoCanTouchMe[0] = 0; 
-            if(value == 1 ) currentTram[0] = value; else isGoodTram = false;
-            Serial.print("Im START TRAM ! ");
+            if (isread == true) break;
+            
+            if(value == 1 )
+            {
+                currentTram[0] = value;
+            }
+            else
+            {
+                isGoodTram = false;
+            }
+            isread = true;
             break;
 
-        case WAIT_SYNCRO:
-            // JUST WAIT LOL
-            timer.start();
-            Serial.print("Im Wainting SYNCRO !");
-            break;
         
         case START_TRAM_D1:
-            if(value == 1 ) currentTram[1]= value; else isGoodTram = false; 
+            if (isread == true) break;
+            if(value == 1 )
+            {
+                currentTram[1] = value;
+            }
+            else
+            {
+                isGoodTram = false;
+            }
+            isread = true;
             break;
 
         case START_TRAM_D2:
-            if(value == 0 ) currentTram[2]= value; else isGoodTram = false; 
+            if (isread == true) break;
+            if(value == 0 )
+            {
+                currentTram[2] = value;
+            }
+            else
+            {
+                isGoodTram = false;
+            }
+            isread = true;
             break;
 
         case DATA_TRAM: // check on the array pour l'instant c'est l un ou l'autre
+            if (isread == true) break;
             if(value == whoCanTouchMe[0]) {
-                currentTram[3] = value;
-                isGoodTram = true;
+                currentTram[3]= value;
             } 
             else isGoodTram = false; 
-            
+            isread = true;
             break;
 
         case DATA_TRAM_PARITY:
+            if (isread == true) break;
             isGoodTram == value != currentTram[3] ? true : false;
+            isread = true;
             break;
 
         case WIN:
-            Serial.print("YOUHOU");
+            Serial.print("\nYOUHOU\n");
+            break;
     }
 }
