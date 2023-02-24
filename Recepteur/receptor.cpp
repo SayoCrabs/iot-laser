@@ -8,7 +8,7 @@
 int currentTram[5];
 bool isGoodTram;
 int whoCanTouchMe[1];
-int value;
+int value = 0;
 
 enum State
 {
@@ -36,7 +36,7 @@ String stateToString(int state)
     int tempsRead = 0;
     int tempsWrite = 0;
     int itSeuil = 0;
-    float marge = 1.2;
+    float marge = 1.5;
     int seuilMed[20];
     int pinDetector = 35;
 
@@ -152,17 +152,17 @@ Timer timer;
 
 void runFSM()
 {
-    fsm.checkState(WAITING, WAIT_SYNCRO, value = 1);
+    fsm.checkState(WAITING, WAIT_SYNCRO, value == 1);
     fsm.checkState(WAIT_SYNCRO, START_TRAM, timer.elapsed() >= 100);
 
     fsm.checkState(START_TRAM, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM, START_TRAM_D1, currentTram[0] = 1 && timer.elapsed() >= 200);
+    fsm.checkState(START_TRAM, START_TRAM_D1, currentTram[0] == 1 && timer.elapsed() >= 200);
 
     fsm.checkState(START_TRAM_D1, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM_D1, START_TRAM_D2, currentTram[1] = 1 && timer.elapsed() >= 200);
+    fsm.checkState(START_TRAM_D1, START_TRAM_D2, currentTram[1] == 1 && timer.elapsed() >= 200);
 
     fsm.checkState(START_TRAM_D2, WAITING, !isGoodTram);
-    fsm.checkState(START_TRAM_D2, DATA_TRAM, currentTram[2] = 0 && timer.elapsed() >= 200);
+    fsm.checkState(START_TRAM_D2, DATA_TRAM, currentTram[2] == 0 && timer.elapsed() >= 200);
 
     fsm.checkState(DATA_TRAM, WAITING, !isGoodTram);
     fsm.checkState(DATA_TRAM, DATA_TRAM_PARITY, isGoodTram && timer.elapsed() >= 200);
@@ -193,7 +193,7 @@ void loop()
 {
     secondLoop();
     runFSM();
-    value = getBit();
+    value = getBit(pinDetector);
 
     // run the current state
     switch(fsm.getCurrentState())
@@ -206,10 +206,13 @@ void loop()
             // definit si il peut etre touche par un tir aerien/sol ou les deux 
             whoCanTouchMe[0] = 0; 
             if(value == 1 ) currentTram[0] = value; else isGoodTram = false;
+            Serial.print("Im START TRAM ! ");
             break;
 
         case WAIT_SYNCRO:
             // JUST WAIT LOL
+            timer.start();
+            Serial.print("Im Wainting SYNCRO !");
             break;
         
         case START_TRAM_D1:
@@ -222,7 +225,7 @@ void loop()
 
         case DATA_TRAM: // check on the array pour l'instant c'est l un ou l'autre
             if(value == whoCanTouchMe[0]) {
-                currentTram[3]= value;
+                currentTram[3] = value;
                 isGoodTram = true;
             } 
             else isGoodTram = false; 
